@@ -1,0 +1,3 @@
+scalarTransportHetADDiagFoam.C
+
+EXE = $(FOAM_APPBIN)/scalarTransportHetADDiagFoam
