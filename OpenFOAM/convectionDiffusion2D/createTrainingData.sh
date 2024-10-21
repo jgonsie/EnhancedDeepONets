@@ -8,7 +8,7 @@ DT=(0.1 0.01)
 # Define the template case directory and destination directory
 template_dir="./baseCaseSteadyState"
 destination_dir="./training_data"
-N_proc = 5
+N_proc=5
 
 # Copy the template case to the destination directory for each parameter value
 for param_DT in "${DT[@]}"; do
