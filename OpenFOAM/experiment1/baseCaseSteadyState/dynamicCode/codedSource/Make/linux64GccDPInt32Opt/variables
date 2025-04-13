@@ -1,0 +1,1 @@
+LIB = $(PWD)/../platforms/$(WM_OPTIONS)/lib/libcodedSource_f72b4e63ddea9de4c79a9eee3ac0f33f0685db6f

@@ -31,8 +31,13 @@ def upload_case(case_directory, time, fieldNames, case):
             return result_t
         
         route = os.path.join(case_directory, str(time), field)
-        upload = Ofpp.parse_field_all(route)
-        result_centers = prepare_data(upload[0], ncells)
+        if field == 'grad(T)':
+            upload = Ofpp.parse_internal_field(route)
+            result_centers = prepare_data(upload, ncells)
+        else:
+            upload = Ofpp.parse_field_all(route)
+            result_centers = prepare_data(upload[0], ncells)
+
         result_boundaries = {}
         # for k,v in upload[1].items():
         #     if len(list(v.keys())) >= 1 and b'value' in list(v.keys()):
@@ -89,6 +94,16 @@ def upload_diagonal(root_directory):
     
     return gradMu
 
+def upload_vector(root_directory):
+    f = open(root_directory, "r")
+    columns = []  
+    for x in f:
+      columns.append(float(x))
+    gradMu = np.stack(columns)
+    f.close()
+    
+    return gradMu
+
 def upload_training_data(root_directory, time=0.1, diagonal=True, jacobian=False):
     
     case_directories = os.listdir(root_directory)
@@ -104,18 +119,47 @@ def upload_training_data(root_directory, time=0.1, diagonal=True, jacobian=False
         result[field] = np.stack([i[field] for i in data])
         
     if jacobian == True:
-        data_jac_mu = Parallel(n_jobs=-1)(delayed(upload_jacobian)(root_directory+case_dir+'/jacMu(T)') for case_dir in case_directories) 
+        data_jac_mu = Parallel(n_jobs=-1)(delayed(upload_vector)(root_directory+case_dir+'/jacMu(T)') for case_dir in case_directories) 
         result['jacMu(T)'] = np.stack(data_jac_mu)
-        data_jac_mu = Parallel(n_jobs=-1)(delayed(upload_jacobian)(root_directory+case_dir+'/jacUx(T)') for case_dir in case_directories) 
-        result['jacUx(T)'] = np.stack(data_jac_mu)
-        data_jac_mu = Parallel(n_jobs=-1)(delayed(upload_jacobian)(root_directory+case_dir+'/jacUy(T)') for case_dir in case_directories) 
-        result['jacUy(T)'] = np.stack(data_jac_mu)
+        # data_jac_mu = Parallel(n_jobs=-1)(delayed(upload_jacobian)(root_directory+case_dir+'/jacUx(T)') for case_dir in case_directories) 
+        # result['jacUx(T)'] = np.stack(data_jac_mu)
+        # data_jac_mu = Parallel(n_jobs=-1)(delayed(upload_jacobian)(root_directory+case_dir+'/jacUy(T)') for case_dir in case_directories) 
+        # result['jacUy(T)'] = np.stack(data_jac_mu)
         
     # if diagonal == True:
     #     data_diag = Parallel(n_jobs=-1)(delayed(upload_diagonal)(root_directory+case_dir) for case_dir in case_directories) 
     #     result['gradMu(T)'] = np.stack(data_diag)
+    
+    if 'DT' not in field_names:
+        dts = [float(dirs.split('-')[0].split('_')[1]) for dirs in case_directories]
+        result['DT'] = np.stack(dts, axis=0)
+        
     return result
 
+def upload_single_data(root_directory, time=0.1, diagonal=True, jacobian=False):
+    
+    field_names = os.listdir(root_directory+'/0')
+    foam_case = Ofpp.FoamMesh(root_directory)
+
+    data = upload_case(root_directory, time, field_names, foam_case)
+    
+    result = {}
+    for k,v in data.items():
+        result[k] = np.expand_dims(v, axis=0)
+    
+    if jacobian == True:
+        data_jac_mu = upload_vector(root_directory+'/jacMu(T)') 
+        result['jacMu(T)'] = np.expand_dims(data_jac_mu, axis=0)
+    
+    # if 'DT' not in field_names:
+    #     dts = [float(dirs.split('-')[0].split('_')[1]) for dirs in case_directories]
+    #     result['DT'] = np.stack(dts, axis=0)
+        
+    return result
+
+# data_route = '../OpenFOAM/tests/pure_convection'
+# training_data = upload_single_data(data_route, jacobian=True)
 
 # data = upload_training_data('../OpenFOAM/pureConvection1D/training_dataSS/')
 # data = upload_training_data('../OpenFOAM/convectionDiffusion2D/training_dataSS/')
+# data = upload_training_data('../OpenFOAM/convectionDiffusion2D_10x10_mu_v2/training_data/', jacobian=True)

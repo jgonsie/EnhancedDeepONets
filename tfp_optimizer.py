@@ -153,10 +153,12 @@ def lbfgs_minimize(trainable_variables, build_loss, train_data, previous_optimiz
         build_loss: A function to build the loss function expression.
         previous_optimizer_results
     """
+
     func = LossAndFlatGradient(trainable_variables, build_loss, train_data)
     initial_position = None
     if previous_optimizer_results is None:
         initial_position = func.to_flat_weights(trainable_variables)
+
     results = tfp.optimizer.lbfgs_minimize(
         func,
         initial_position=initial_position,
