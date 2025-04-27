@@ -200,7 +200,7 @@ class Grid():
         points = {}
         weights = {}
         
-        x = self.axis_x
+        x = np.asarray(self.axis_x, dtype='float32')
         y = tf.repeat(x,repeats=self.size_y)
         x_exp = tf.expand_dims(tf.expand_dims(x, axis=-1), axis=0)
         y_exp = tf.expand_dims(tf.expand_dims(y, axis=-1), axis=0)
@@ -208,7 +208,7 @@ class Grid():
         points['coord_y'] = tf.tile(y_exp,[batch,1,1])
         
         # weights = tf.ones([batch,self.ncells,1], dtype='float64') * self.area
-        weights = tf.ones([batch,self.ncells,1], dtype='float64')
+        weights = tf.ones([batch,self.ncells,1], dtype='float32')
         
         return (points, weights)
     

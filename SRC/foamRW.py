@@ -13,7 +13,7 @@ from joblib import Parallel, delayed
 
 def upload_case(case_directory, time, fieldNames, case):
     '''Reads the data from OpenFOAM and loads it in numpy in vector form'''
-    
+
     result = {}
     ncells = case.num_cell+1
     # ncells_b = {}
@@ -104,9 +104,9 @@ def upload_vector(root_directory):
     
     return gradMu
 
-def upload_training_data(root_directory, time=0.1, diagonal=True, jacobian=False):
+def upload_training_data(root_directory, time=0.1, diagonal=True, jacobian=False, dtype='float64'):
     
-    case_directories = os.listdir(root_directory)
+    case_directories = np.sort(os.listdir(root_directory))
     field_names = os.listdir(root_directory+case_directories[0]+'/0')
     foam_case = Ofpp.FoamMesh(root_directory+case_directories[0])
 
@@ -116,11 +116,11 @@ def upload_training_data(root_directory, time=0.1, diagonal=True, jacobian=False
     result = {}
     
     for field in data[0].keys():
-        result[field] = np.stack([i[field] for i in data])
+        result[field] = np.stack([i[field] for i in data], dtype=dtype)
         
     if jacobian == True:
         data_jac_mu = Parallel(n_jobs=-1)(delayed(upload_vector)(root_directory+case_dir+'/jacMu(T)') for case_dir in case_directories) 
-        result['jacMu(T)'] = np.stack(data_jac_mu)
+        result['jacMu(T)'] = np.stack(data_jac_mu, dtype=dtype)
         # data_jac_mu = Parallel(n_jobs=-1)(delayed(upload_jacobian)(root_directory+case_dir+'/jacUx(T)') for case_dir in case_directories) 
         # result['jacUx(T)'] = np.stack(data_jac_mu)
         # data_jac_mu = Parallel(n_jobs=-1)(delayed(upload_jacobian)(root_directory+case_dir+'/jacUy(T)') for case_dir in case_directories) 
@@ -132,7 +132,7 @@ def upload_training_data(root_directory, time=0.1, diagonal=True, jacobian=False
     
     if 'DT' not in field_names:
         dts = [float(dirs.split('-')[0].split('_')[1]) for dirs in case_directories]
-        result['DT'] = np.stack(dts, axis=0)
+        result['DT'] = np.stack(dts, axis=0, dtype=dtype)
         
     return result
 

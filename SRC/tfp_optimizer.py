@@ -10,7 +10,7 @@ Created on Fri Apr 26 12:25:55 2024
 
 import numpy as np
 import tensorflow as tf
-import tensorflow_probability as tfp
+# import tensorflow_probability as tfp
 
 LBFGS_options = {}
 
