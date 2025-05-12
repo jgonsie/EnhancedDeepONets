@@ -19,7 +19,7 @@ from SRC.grids2D import Grid
 from SRC import postprocessing as pp
 
 os.environ["KERAS_BACKEND"] = "tensorflow"
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import keras as keras
 dtype = 'float32'
 keras.backend.set_floatx(dtype)
@@ -27,6 +27,14 @@ keras.backend.set_floatx(dtype)
 # Random seeds for being deterministic.
 keras.utils.set_random_seed(1234)
 
+physical_devices = tf.config.list_physical_devices('GPU')
+try:
+  tf.config.experimental.set_memory_growth(physical_devices[0], True)
+except:
+  # Invalid device or cannot modify virtual devices once initialized.
+  pass
+
+# tf.config.experimental.get_memory_info("GPU:0")['current']
 
 if __name__ == "__main__":
     
@@ -38,8 +46,7 @@ if __name__ == "__main__":
     grid = Grid(size_x = 50, size_y = 50, step_size = 1/50)
 
     # Data for training and validation
-    # data_route = './OpenFOAM/experiment1/training_data/'
-    data_route = './OpenFOAM/tests/t2/training_data/'
+    data_route = './OpenFOAM/experiment1/training_data/'
     training_data = fRW.upload_training_data(data_route, jacobian=True,dtype='float32')
     # x_train, y_train, x_val, y_val = prepare_raw_data_percentage(training_data, train_split=0.1)
     x_train, y_train, x_val, y_val = prepare_raw_data_items_esp(training_data, train_split=10)
@@ -66,25 +73,31 @@ if __name__ == "__main__":
     E_diff = np.sum(pure_diff_case['T']**2) * (grid.step**2)
     E_tr = np.sum(y_train['T']**2, axis=1) * (grid.step**2)
     E_val = np.sum(y_val['T']**2, axis=1) * (grid.step**2)
-    plot00 = pp.plot_log_data_distribution2(x_train['DT'], E_tr, x_val['DT'], E_val,E_conv, E_diff)
+    plot00 = pp.plot_log_data_distribution2(x_train['DT'], E_tr, x_val['DT'], E_val,E_conv, E_diff, name='u')
+
+    E_conv = np.sum(pure_conv_case['grad(T)_x']**2+ pure_conv_case['grad(T)_y']**2) * (grid.step**2)
+    E_diff = np.sum(pure_diff_case['grad(T)_x']**2+pure_diff_case['grad(T)_y']**2) * (grid.step**2)
+    E_tr = np.sum(y_train['grad(T)_x']**2+y_train['grad(T)_y']**2, axis=1) * (grid.step**2)
+    E_val = np.sum(y_val['grad(T)_x']**2+y_val['grad(T)_y']**2, axis=1) * (grid.step**2)
+    plot00 = pp.plot_log_data_distribution2(x_train['DT'], E_tr, x_val['DT'], E_val,E_conv, E_diff, name='gradu')
 
 
     # Create learning model
-    net = DeepONet(layers_branch_v=[50], layers_branch_mu=[50,70], 
-                    layers_trunk=[50,50,50,70], dimension='2D', seed=420, dtypeid=tf.float32)
+    net = DeepONet(layers_branch=[50,70], layers_trunk=[50,50,50,70], 
+                   dimension='2D', seed=420, dtypeid=tf.float32)
                     
 
     # Select model
-    # model = NeuralOperatorModel(net, grid, 'vanilla', LS=True, regularizer = 10**(-3))
-    model = NeuralOperatorModel(net, grid, 'H1', LS=False)
+    # model = NeuralOperatorModel(net, grid, 'vanilla', LS=False, regularizer = 10**(-1))
+    # model = NeuralOperatorModel(net, grid, 'H1', LS=False)
     # model = NeuralOperatorModel(net, grid, 'phy', LS=True)
-    # model = NeuralOperatorModel(net, grid, 'van+der',  LS=False, regularizer = 10**(-3))
-    # model = NeuralOperatorModel(net, grid, 'H1+der',  LS=False, regularizer = 10**(-2))
+    # model = NeuralOperatorModel(net, grid, 'van+der',  LS=False, regularizer = 10**(-2))
+    model = NeuralOperatorModel(net, grid, 'H1+der',  LS=False, regularizer = 10**(-2))
     # model = NeuralOperatorModel(net, grid, 'phy+der',  LS=True)
 
     sim_name = 'H1+der_LS10-2'
     model.compile(optimizer=keras.optimizers.Adam(learning_rate=0.0001, clipnorm=1.0),
-                  jit_compile=True)#run_eagerly=True)
+                  jit_compile=True)#, run_eagerly=True)
                   
     #Initialize model
     result = model(x_train) 
@@ -165,12 +178,12 @@ if __name__ == "__main__":
                     for k,v in model.integration_points.items()}
     
     # Prepare data for DeepONet
-    x_curated = {**x_train, **model.points_and_weights}
+    x_curated = {**x_train, **model.integration_points}
     
     A, b = model.system(x_curated, y_train)
     A_flat = tf.reshape(A, [-1,A.shape.as_list()[-1]])
     b_flat = tf.reshape(b, [-1,b.shape.as_list()[-1]])
-    alpha_new = tf.linalg.lstsq(A_flat, b_flat, l2_regularizer=model.regularizer)
+    alpha_new = tf.linalg.lstsq(A_flat, b_flat, l2_regularizer=10**(-4))
 
     x_batch, y_batch = extract_batch(x_val, y_val, initial=151, size=38)
     

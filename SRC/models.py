@@ -6,19 +6,16 @@ Created on Tue Apr 16 17:13:06 2024
 @author: jesusglezs97
 """
 import tensorflow as tf
-import keras as keras
+import keras
 from SRC.tfp_optimizer import lbfgs_minimize
 from SRC.utils import get_model_performance
 from SRC.metrics import relativeL2error, myCustomLoss
 
 class DeepONet(keras.Model):
-    def __init__(self, layers_branch_v, layers_branch_mu, layers_trunk, 
+    def __init__(self, layers_branch, layers_trunk, 
                  num_rand_sampling = 100, dimension = '1D', seed = 42,
-                 dtypeid = tf.float64, **kwargs):
-        
-        # assert layers_branch_v[-1]==layers_branch_mu[-1], f'The size of the last layer of the branches must be equal: {layers_branch_v[-1]} vs {layers_branch_mu[-1]}'
-        # assert layers_branch_v[-1]==layers_trunk[-1], f'The size of the last layer of the branch and trunk must be equal: {layers_branch_v[-1]} vs {layers_trunk[-1]}'
-        
+                 dtypeid = 'float64', **kwargs):
+                
         super().__init__()
         
         # Random seeds for being deterministic.
@@ -32,19 +29,9 @@ class DeepONet(keras.Model):
         # Random seeds for being deterministic.
         init = tf.keras.initializers.GlorotUniform(seed=seed)
         
-        # Create branch net for velocity
-        # br_v_layers = [keras.layers.Dense(units=layer, activation="tanh", 
-        #                                   use_bias=True) for layer in layers_branch_v[:-1]]
-        # br_v_layers.append(keras.layers.Dense(units=layers_branch_v[-1], 
-        #                                       activation="linear", 
-        #                                       use_bias=True))
-        # br_v_layers.insert(0, keras.Input(shape=(self.num_rand_sampling,2,)))
-        # br_v_layers.insert(1, keras.layers.Flatten())
-        # self.branch_v = keras.Sequential(br_v_layers, name='Branch_v')
-        
         # Create branch net
         br_layers = [keras.layers.Dense(units=layer, activation="tanh", 
-                                            use_bias=True, kernel_initializer=init) for layer in layers_branch_mu]
+                                            use_bias=True, kernel_initializer=init) for layer in layers_branch]
         self.branch = keras.Sequential(br_layers, name='Branch')
         
         # Create trunk
@@ -87,34 +74,21 @@ class DeepONet(keras.Model):
         '''Construct all the matrix obtained previously to the linear layer 
         application'''
         
-        # x_brv = self.sort_and_reshape_state(inputs, self.fields_br_v) #(b,s,2)
-        # # print('Input shape brv: ', x_brv.shape)
-        # with tf.GradientTape(watch_accessed_variables=False) as tape:
-        #     tape.watch(x_brv)
-        #     basis_brv = self.branch_v(x_brv)
-        #     # basis = basis*(x_watched-0) #To impose boundary conditions
-        #     # basis = basis*(x_watched-1)
-        #     y_pred = self.linear_layer(basis_brv) #Necessary to initialize the layer
-        # dbasis_brv = tf.squeeze(tape.batch_jacobian(basis_brv,x_brv))
-        # # print('Output shape basis brv: ', basis_brv.shape)
-        # # print('Output shape dbasis brv: ', dbasis_brv.shape)
-        # del tape
-        
         x_br = self.sort_state(inputs, self.fields_br) #(b,1)
-        # print('Input shape brmu: ', x_brmu.shape)
+        # print('Input shape br: ', x_br.shape)
+        # tf.print('BRANCH INPUT: ', x_br)
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(x_br)
             basis_br = self.branch(x_br)
             
         dbasis_br = tape.batch_jacobian(basis_br,x_br)
-        # print('Output shape basis brmu: ', basis_brmu.shape)
-        # print('Output shape dbasis brmu: ', dbasis_brmu.shape)
+        # print('Output shape basis br: ', basis_br.shape)
+        # print('Output shape dbasis br: ', dbasis_br.shape)
         del tape
-
-        # y_pred = self.linear_layer(basis_brmu) #Necessary to initialize the layer
         
         x_tr = self.sort_state(inputs, self.fields_tr) #(e,2)
         # print('Input shape tr: ', x_tr.shape)
+        # tf.print('Trunk INPUT: ', x_tr)
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(x_tr)
             basis_tr = self.trunk(x_tr) #(e,j)
@@ -158,9 +132,9 @@ class DeepONet(keras.Model):
     
     
 class NeuralOperatorModel(keras.Model):
-    
+
     def __init__(self, net, grid, system_constructor, quadrature = 'centroids',
-                 LS = True, regularizer = 10**(-3), GPU = True, **kwargs):
+                 LS = True, regularizer = 10**(-3), kappas = None, GPU = True, **kwargs):
         
         super().__init__()
         self.net = net
@@ -207,12 +181,13 @@ class NeuralOperatorModel(keras.Model):
         else:
             ValueError(f'Loss selected not found: {system_constructor}')
           
-        # # Initialize branch and trunk nets
-        # self.net.trunk.build(input_shape=(None, self.net.dim))
-        # self.net.branch_mu.build(input_shape=(None, 1))
-        # # self.net.branch_v.build(input_shape=(None, self.net.num_rand_sampling,self.net.dim))
-        # self.net.linear_layer.build(input_shape=(None, self.net.num_basis_func))
-              
+        # Loss weighting factors    
+        if kappas == None:
+            self.kappas = {k:tf.constant((1.), dtype=self.dtypeid) 
+                           for k in self.keys_phy+self.keys_der}
+        else:
+            self.kappas = kappas
+                
         # Generate spatial evaluation points
         self.integration_points, _ = self.points_and_weights()
         
@@ -226,38 +201,11 @@ class NeuralOperatorModel(keras.Model):
         self.val_L2re_u_tracker = relativeL2error()
         self.val_L2re_grad_u_tracker = relativeL2error()
         
-        self.input_signature = [({'DT': tf.TensorSpec(shape=(None,1), dtype=self.dtypeid),
-                                  'v_x': tf.TensorSpec(shape=(None,self.grid.ncells,1), dtype=self.dtypeid),
-                                  'v_y': tf.TensorSpec(shape=(None,self.grid.ncells,1), dtype=self.dtypeid)},
-                                 {'T': tf.TensorSpec(shape=(None,self.grid.ncells,1), dtype=self.dtypeid),
-                                  'grad(T)_x': tf.TensorSpec(shape=(None,self.grid.ncells,1), dtype=self.dtypeid),
-                                  'grad(T)_y': tf.TensorSpec(shape=(None,self.grid.ncells,1), dtype=self.dtypeid),
-                                  'jacMu(T)': tf.TensorSpec(shape=(None,self.grid.ncells,1), dtype=self.dtypeid)})]
-        
-        self._train_step_fn = tf.function(
-            self._train_step_core,
-            input_signature=self.input_signature,
-            jit_compile=True)
-        
-        self._test_step_fn = tf.function(
-            self._test_step_core,
-            input_signature=self.input_signature,
-            jit_compile=True)
         
     def points_and_weights(self):
         '''Generates new integration points and weights'''
-        
-        # Generate integration points and weights
-        outputs = tf.numpy_function(
-            func = self.grid.generate_quadrature_tf,
-            inp  = [self.quadrature, tf.constant(1), 
-                    tf.constant(self.n_points_quad)], # Inputs as TensorFlow tensors
-            Tout = [self.dtypeid, self.dtypeid, self.dtypeid]  # Data types of the outputs
-            )
-        
-        points = {'coord_x': tf.squeeze(tf.ensure_shape(outputs[0], (1, self.grid.ncells, self.n_points_quad)), axis=0), 
-                  'coord_y': tf.squeeze(tf.ensure_shape(outputs[1], (1, self.grid.ncells, self.n_points_quad)), axis=0)}
-        weights = tf.squeeze(tf.ensure_shape(outputs[2], (1, self.grid.ncells, self.n_points_quad)), axis=0)
+               
+        points, weights = self.grid.generate_quadrature_centroids(dtype=self.dtypeid)
         
         return points, weights
     
@@ -270,9 +218,9 @@ class NeuralOperatorModel(keras.Model):
         Umatrix = tf.einsum('bj,ej->bej', coeffs_br, basis_tr)
                
         Amatrix = Umatrix #LHS of the LS system
-        bvector = y_dict['T'] #RHS of the LS system
+        Bvector = y_dict['T'] #RHS of the LS system
   
-        return Amatrix, bvector
+        return Amatrix, Bvector
    
     def construct_LS_H1(self, x_dict, y_dict):
         '''Constructs the Least-Squares system A x = b for the enhanced DeepONets'''
@@ -280,52 +228,56 @@ class NeuralOperatorModel(keras.Model):
         #Contruct the matrix for LS system
         coeffs_br, basis_tr, dcoeffs_br, dbasis_tr = self.net.construct_matrix(x_dict) 
        
-        Umatrix = tf.einsum('bj,ej->bej', coeffs_br, basis_tr)
+        Umatrix = tf.einsum('bj,ej->bej', coeffs_br, basis_tr) 
         dUmatrix_x = tf.einsum('bj,ej->bej', coeffs_br, dbasis_tr[:,:,0])
         dUmatrix_y = tf.einsum('bj,ej->bej', coeffs_br, dbasis_tr[:,:,1])
 
         # LHS of the LS system
-        Amatrix = tf.concat([Umatrix, dUmatrix_x, dUmatrix_y], axis=1)
+        Amatrix = tf.concat([Umatrix * self.kappas['loss_u'],
+                             dUmatrix_x * self.kappas['loss_gradu_x'],
+                             dUmatrix_y * self.kappas['loss_gradu_y']], axis=1)
         
         # RHS of the LS system
-        Bvector = tf.concat([y_dict['T'], y_dict['grad(T)_x'], y_dict['grad(T)_y']], axis=1)
+        Bvector = tf.concat([y_dict['T'] * self.kappas['loss_u'],
+                             y_dict['grad(T)_x'] * self.kappas['loss_gradu_x'], 
+                             y_dict['grad(T)_y'] * self.kappas['loss_gradu_y']], axis=1)
         
         return Amatrix, Bvector
 
     
-    def construct_LS_phy(self, x_dict, y_dict):
-        '''Constructs the Least-Squares system A x = b for the enhanced DeepONets'''
+    # def construct_LS_phy(self, x_dict, y_dict):
+    #     '''Constructs the Least-Squares system A x = b for the enhanced DeepONets'''
     
-        #Contruct the matrix for LS system
-        coeffs_br, basis_tr, dcoeffs_br, dbasis_tr = self.net.construct_matrix(x_dict) 
+    #     #Contruct the matrix for LS system
+    #     coeffs_br, basis_tr, dcoeffs_br, dbasis_tr = self.net.construct_matrix(x_dict) 
         
-        Umatrix = tf.einsum('bj,ej->bej', coeffs_br, basis_tr)
-        dUmatrix_x = tf.einsum('bj,ej->bej', coeffs_br, dbasis_tr[:,:,0])
-        dUmatrix_y = tf.einsum('bj,ej->bej', coeffs_br, dbasis_tr[:,:,1])
+    #     Umatrix = tf.einsum('bj,ej->bej', coeffs_br, basis_tr)
+    #     dUmatrix_x = tf.einsum('bj,ej->bej', coeffs_br, dbasis_tr[:,:,0])
+    #     dUmatrix_y = tf.einsum('bj,ej->bej', coeffs_br, dbasis_tr[:,:,1])
         
-        # Build the terms for the loss
-        vdUmatrix_x = tf.einsum('bep,bej->bej', x_dict['v_x'], dUmatrix_x)
-        vdUmatrix_y = tf.einsum('bep,bej->bej', x_dict['v_y'], dUmatrix_y)
-        vdUmatrix = vdUmatrix_x + vdUmatrix_y
-        mudUmatrix_x = tf.einsum('bp,bej->bej', x_dict['DT'], dUmatrix_x)
-        mudUmatrix_y = tf.einsum('bp,bej->bej', x_dict['DT'], dUmatrix_y)
-        mudUmatrix = mudUmatrix_x + mudUmatrix_y
+    #     # Build the terms for the loss
+    #     vdUmatrix_x = tf.einsum('bep,bej->bej', x_dict['v_x'], dUmatrix_x)
+    #     vdUmatrix_y = tf.einsum('bep,bej->bej', x_dict['v_y'], dUmatrix_y)
+    #     vdUmatrix = vdUmatrix_x + vdUmatrix_y
+    #     mudUmatrix_x = tf.einsum('bp,bej->bej', x_dict['DT'], dUmatrix_x)
+    #     mudUmatrix_y = tf.einsum('bp,bej->bej', x_dict['DT'], dUmatrix_y)
+    #     mudUmatrix = mudUmatrix_x + mudUmatrix_y
 
-        # LHS of the LS system
-        Amatrix = tf.concat([Umatrix, vdUmatrix, mudUmatrix], axis=1)
+    #     # LHS of the LS system
+    #     Amatrix = tf.concat([Umatrix, vdUmatrix, mudUmatrix], axis=1)
         
-        # Build data terms of the loss function
-        vdUmatrix_x_fv = tf.einsum('bep,bep->bep', x_dict['v_x'], y_dict['grad(T)_x'])
-        vdUmatrix_y_fv = tf.einsum('bep,bep->bep', x_dict['v_y'], y_dict['grad(T)_y'])
-        vdUmatrix_fv = vdUmatrix_x_fv + vdUmatrix_y_fv
-        mudUmatrix_x_fv = tf.einsum('bp,bep->bep', x_dict['DT'], y_dict['grad(T)_x'])
-        mudUmatrix_y_fv = tf.einsum('bp,bep->bep', x_dict['DT'], y_dict['grad(T)_y'])
-        mudUmatrix_fv = mudUmatrix_x_fv + mudUmatrix_y_fv
+    #     # Build data terms of the loss function
+    #     vdUmatrix_x_fv = tf.einsum('bep,bep->bep', x_dict['v_x'], y_dict['grad(T)_x'])
+    #     vdUmatrix_y_fv = tf.einsum('bep,bep->bep', x_dict['v_y'], y_dict['grad(T)_y'])
+    #     vdUmatrix_fv = vdUmatrix_x_fv + vdUmatrix_y_fv
+    #     mudUmatrix_x_fv = tf.einsum('bp,bep->bep', x_dict['DT'], y_dict['grad(T)_x'])
+    #     mudUmatrix_y_fv = tf.einsum('bp,bep->bep', x_dict['DT'], y_dict['grad(T)_y'])
+    #     mudUmatrix_fv = mudUmatrix_x_fv + mudUmatrix_y_fv
         
-        # RHS of the LS system
-        Bvector = tf.concat([y_dict['T'], vdUmatrix_fv, mudUmatrix_fv], axis=1)
+    #     # RHS of the LS system
+    #     Bvector = tf.concat([y_dict['T'], vdUmatrix_fv, mudUmatrix_fv], axis=1)
         
-        return Amatrix, Bvector
+    #     return Amatrix, Bvector
 
    
     def construct_LS_vander(self, x_dict, y_dict):
@@ -334,16 +286,16 @@ class NeuralOperatorModel(keras.Model):
         #Contruct the matrix for LS system
         coeffs_br, basis_tr, dcoeffs_br, dbasis_tr = self.net.construct_matrix(x_dict) 
         
-        Umatrix = tf.einsum('bj,ej->bej', coeffs_br, basis_tr)
+        # Creo que aqui tengo que multiplicar por los loss weights
+        Umatrix = tf.einsum('bj,ej->bej', coeffs_br, basis_tr) 
         dUmatrix_mu = tf.einsum('bj,ej->bej', dcoeffs_br[:,:,0], basis_tr) 
-                
         # LHS of the LS system
-        Alist = [Umatrix, dUmatrix_mu]
-        Amatrix = tf.concat(Alist, axis=1)
+        Amatrix = tf.concat([Umatrix * self.kappas['loss_u'],
+                             dUmatrix_mu * self.kappas['loss_gradu_mu']], axis=1)
         
         # RHS of the LS system
-        Blist = [y_dict['T'], y_dict['jacMu(T)']]
-        Bvector = tf.concat(Blist, axis=1)
+        Bvector = tf.concat([y_dict['T'] * self.kappas['loss_u'], 
+                             y_dict['jacMu(T)'] * self.kappas['loss_gradu_mu']], axis=1)
         
         return Amatrix, Bvector
     
@@ -359,51 +311,55 @@ class NeuralOperatorModel(keras.Model):
         dUmatrix_y = tf.einsum('bj,ej->bej', coeffs_br, dbasis_tr[:,:,1])
         
         # LHS of the LS system
-        Alist = [Umatrix, dUmatrix_x, dUmatrix_y, dUmatrix_mu]
-        Amatrix = tf.concat(Alist, axis=1)
+        Amatrix = tf.concat([Umatrix * self.kappas['loss_u'], 
+                             dUmatrix_x * self.kappas['loss_gradu_x'], 
+                             dUmatrix_y * self.kappas['loss_gradu_y'], 
+                             dUmatrix_mu * self.kappas['loss_gradu_mu']], axis=1)
         
-        # RHS of the LS system
-        Blist = [y_dict['T'], y_dict['grad(T)_x'], y_dict['grad(T)_y'], y_dict['jacMu(T)']]
-        Bvector = tf.concat(Blist, axis=1)
+        # RHS of the LS system 
+        Bvector = tf.concat([y_dict['T'] * self.kappas['loss_u'], 
+                             y_dict['grad(T)_x'] * self.kappas['loss_gradu_x'], 
+                             y_dict['grad(T)_y'] * self.kappas['loss_gradu_y'], 
+                             y_dict['jacMu(T)'] * self.kappas['loss_gradu_mu']], axis=1)
         
         return Amatrix, Bvector
     
-    def construct_LS_phyder(self, x_dict, y_dict):
-        '''Constructs the Least-Squares system A x = b for the enhanced DeepONets'''
+    # def construct_LS_phyder(self, x_dict, y_dict):
+    #     '''Constructs the Least-Squares system A x = b for the enhanced DeepONets'''
     
-        #Contruct the matrix for LS system
-        coeffs_br, basis_tr, dcoeffs_br, dbasis_tr = self.net.construct_matrix(x_dict) 
+    #     #Contruct the matrix for LS system
+    #     coeffs_br, basis_tr, dcoeffs_br, dbasis_tr = self.net.construct_matrix(x_dict) 
         
-        Umatrix = tf.einsum('bj,ej->bej', coeffs_br, basis_tr)
-        dUmatrix_mu = tf.einsum('bj,ej->bej', dcoeffs_br[:,:,0], basis_tr)
-        dUmatrix_x = tf.einsum('bj,ej->bej', coeffs_br, dbasis_tr[:,:,0])
-        dUmatrix_y = tf.einsum('bj,ej->bej', coeffs_br, dbasis_tr[:,:,1])
+    #     Umatrix = tf.einsum('bj,ej->bej', coeffs_br, basis_tr)
+    #     dUmatrix_mu = tf.einsum('bj,ej->bej', dcoeffs_br[:,:,0], basis_tr)
+    #     dUmatrix_x = tf.einsum('bj,ej->bej', coeffs_br, dbasis_tr[:,:,0])
+    #     dUmatrix_y = tf.einsum('bj,ej->bej', coeffs_br, dbasis_tr[:,:,1])
         
-        # Build the terms for the loss
-        vdUmatrix_x = tf.einsum('bep,bej->bej', x_dict['v_x'], dUmatrix_x)
-        vdUmatrix_y = tf.einsum('bep,bej->bej', x_dict['v_y'], dUmatrix_y)
-        vdUmatrix = vdUmatrix_x + vdUmatrix_y #(b,e,j)
-        mudUmatrix_x = tf.einsum('bp,bej->bej', x_dict['DT'], dUmatrix_x)
-        mudUmatrix_y = tf.einsum('bp,bej->bej', x_dict['DT'], dUmatrix_y)
-        mudUmatrix = mudUmatrix_x + mudUmatrix_y #(b,e,j)
+    #     # Build the terms for the loss
+    #     vdUmatrix_x = tf.einsum('bep,bej->bej', x_dict['v_x'], dUmatrix_x)
+    #     vdUmatrix_y = tf.einsum('bep,bej->bej', x_dict['v_y'], dUmatrix_y)
+    #     vdUmatrix = vdUmatrix_x + vdUmatrix_y #(b,e,j)
+    #     mudUmatrix_x = tf.einsum('bp,bej->bej', x_dict['DT'], dUmatrix_x)
+    #     mudUmatrix_y = tf.einsum('bp,bej->bej', x_dict['DT'], dUmatrix_y)
+    #     mudUmatrix = mudUmatrix_x + mudUmatrix_y #(b,e,j)
         
-        # LHS of the LS system
-        Alist = [Umatrix, vdUmatrix, mudUmatrix, dUmatrix_mu]
-        Amatrix = tf.concat(Alist, axis=1)
+    #     # LHS of the LS system
+    #     Alist = [Umatrix, vdUmatrix, mudUmatrix, dUmatrix_mu]
+    #     Amatrix = tf.concat(Alist, axis=1)
         
-        # Build data terms of the loss function
-        vdUmatrix_x_fv = tf.einsum('bep,bep->bep', x_dict['v_x'], y_dict['grad(T)_x'])
-        vdUmatrix_y_fv = tf.einsum('bep,bep->bep', x_dict['v_y'], y_dict['grad(T)_y'])
-        vdUmatrix_fv = vdUmatrix_x_fv + vdUmatrix_y_fv
-        mudUmatrix_x_fv = tf.einsum('bp,bep->bep', x_dict['DT'], y_dict['grad(T)_x'])
-        mudUmatrix_y_fv = tf.einsum('bp,bep->bep', x_dict['DT'], y_dict['grad(T)_y'])
-        mudUmatrix_fv = mudUmatrix_x_fv + mudUmatrix_y_fv
+    #     # Build data terms of the loss function
+    #     vdUmatrix_x_fv = tf.einsum('bep,bep->bep', x_dict['v_x'], y_dict['grad(T)_x'])
+    #     vdUmatrix_y_fv = tf.einsum('bep,bep->bep', x_dict['v_y'], y_dict['grad(T)_y'])
+    #     vdUmatrix_fv = vdUmatrix_x_fv + vdUmatrix_y_fv
+    #     mudUmatrix_x_fv = tf.einsum('bp,bep->bep', x_dict['DT'], y_dict['grad(T)_x'])
+    #     mudUmatrix_y_fv = tf.einsum('bp,bep->bep', x_dict['DT'], y_dict['grad(T)_y'])
+    #     mudUmatrix_fv = mudUmatrix_x_fv + mudUmatrix_y_fv
         
-        # RHS of the LS system
-        Blist = [y_dict['T'], vdUmatrix_fv, mudUmatrix_fv, y_dict['jacMu(T)']]
-        Bvector = tf.concat(Blist, axis=1)
+    #     # RHS of the LS system
+    #     Blist = [y_dict['T'], vdUmatrix_fv, mudUmatrix_fv, y_dict['jacMu(T)']]
+    #     Bvector = tf.concat(Blist, axis=1)
         
-        return Amatrix, Bvector
+    #     return Amatrix, Bvector
     
             
     def resolve_LS(self, x_dict, y_dict):
@@ -412,11 +368,14 @@ class NeuralOperatorModel(keras.Model):
 
         # Construct LS system
         A, b = self.system(x_dict, y_dict) #(b,c*e,j) (b,c*e,1)
-
+        
         # Solve LS system (op1)
         A_flat = tf.reshape(A, [-1,A.shape.as_list()[-1]])
         b_flat = tf.reshape(b, [-1,b.shape.as_list()[-1]])
         alpha_new = tf.linalg.lstsq(A_flat, b_flat, l2_regularizer=self.regularizer)
+        
+        # alpha_new = tf.linalg.lstsq(A, b, l2_regularizer=self.regularizer)
+        # alpha_new = tf.reduce_mean(alpha_new, axis=0)
         # Update linear layer weights
         computable_vars = self.net.linear_layer.weights[0]
         computable_vars.assign(alpha_new)
@@ -460,11 +419,8 @@ class NeuralOperatorModel(keras.Model):
     
     def check_LS(self, x_dict, y_dict):
         
-        batch_size = x_dict[list(x_dict.keys())[0]].shape[0]
-        integ_points, integ_weights = self.points_and_weights(batch_size)
-        
         # Prepare data for DeepONet
-        x_curated = {**x_dict, **integ_points}
+        x_curated = {**x_dict, **self.integration_points}
         
         # Construct first and second derivative of the loss wrt alpha when alpha=0
         computable_vars = self.net.linear_layer.weights[0]
@@ -482,14 +438,14 @@ class NeuralOperatorModel(keras.Model):
         A_flat = tf.reshape(A, [-1,A.shape.as_list()[-1]])
         b_flat = tf.reshape(b, [-1,b.shape.as_list()[-1]])
         
-        tf.print('A shape:', A.shape)
-        tf.print('A_flat shape:', A_flat.shape)
-        tf.print('A_mean shape:', A_flat.shape)
-        tf.print('b shape:', b.shape)
-        tf.print('b_flat shape:', b_flat.shape)
-        tf.print('b_mean shape:', b_flat.shape)
-        tf.print('J shape:', J.shape)
-        tf.print('H shape:', H.shape)
+        # tf.print('A shape:', A.shape)
+        # tf.print('A_flat shape:', A_flat.shape)
+        # tf.print('A_mean shape:', A_flat.shape)
+        # tf.print('b shape:', b.shape)
+        # tf.print('b_flat shape:', b_flat.shape)
+        # tf.print('b_mean shape:', b_flat.shape)
+        # tf.print('J shape:', J.shape)
+        # tf.print('H shape:', H.shape)
         
         LHS_normal = 1/2*H
         RHS_normal = -1/2*J
@@ -497,51 +453,16 @@ class NeuralOperatorModel(keras.Model):
         LHS_original = tf.matmul(A_flat,A_flat, transpose_a=True)
         RHS_original = tf.matmul(A_flat,b_flat, transpose_a=True)
         
-        weights_normal = tf.linalg.solve(LHS_normal,RHS_normal)
-        # weights_original = tf.linalg.solve(LHS_original,RHS_original)
-        weights_original = tf.linalg.lstsq(A_flat, b_flat, l2_regularizer=10**(-13))
+        weights_original = tf.linalg.lstsq(A_flat, b_flat)#, l2_regularizer=10**(-13))
+        weights_original2 = tf.linalg.lstsq(A, b, l2_regularizer=10**(-10))
+        weights_original2 = tf.reduce_mean(weights_original2, axis=0)
+        weights_normal_imp = tf.linalg.solve(LHS_normal,RHS_normal)
+        weights_normal_exp = tf.linalg.solve(LHS_original,RHS_original)
         weights_david = -tf.matmul(tf.linalg.inv(H),J)
-        tf.print('weights: ', weights_david)
+        # tf.print('weights: ', weights_david)
         
-        return LHS_original, RHS_original, weights_original, LHS_normal, RHS_normal, weights_normal
-    
-    
-    def compute_kappas(self, x_dict, y_dict):
-        ''' Computes the kappas for the weighting loss based on the ratios of the
-        first epoch'''
-        
-        # Prepare data for DeepONet
-        x_curated = {**x_dict, **self.points_and_weights}
-        
-        # Run the model
-        A, b = self.system(x_curated, y_dict)
-        unweighted_loss = tf.square(self.net.linear_layer(A)-b)
-        
-        keys = ['loss_u', 'loss_vgradu', 'loss_mugradu', 'loss_gradu_vx', 
-                'loss_gradu_vy', 'loss_gradu_mu']
-        
-        # Computation of the number of parcial loss terms involver
-        items = unweighted_loss.shape[1]
-        nL = int(items/self.grid.ncells)
-        
-        # Extract the partial losses from the general loss
-        Lpartial = tf.split(unweighted_loss, num_or_size_splits=nL, axis=1)
-        meanLpartial = {keys[n]:tf.reduce_mean(Lpartial[n]) for n in range(nL)}
-        # meanL = tf.reduce_mean([v for k,v in meanLpartial.items()])
-        
-        # Computation of the weights or pondering factors
-        # self.kappas = {k:tf.stop_gradient(meanL/(v + 1e-12)) for k,v in meanLpartial.items()}
-        # self.kappas = {k:tf.stop_gradient(tf.reduce_max([v for v in meanLpartial.values()])/v) for k,v in meanLpartial.items()}
-        # self.kappas = {'loss_u': tf.convert_to_tensor(([1.]), dtype=self.dtype), 
-        #                'loss_vgradu': tf.convert_to_tensor(([1.]), dtype=self.dtype),
-        #                'loss_mugradu': tf.convert_to_tensor(([1.]), dtype=self.dtype),
-        #                'loss_gradu_vx': tf.convert_to_tensor(([1.]), dtype=self.dtype),
-        #                'loss_gradu_vy': tf.convert_to_tensor(([1.]), dtype=self.dtype), 
-        #                'loss_gradu_mu': tf.convert_to_tensor(([1.]), dtype=self.dtype),
-        #                }
-        self.kappas = {k:tf.convert_to_tensor(([1.]), dtype=self.dtypeid) for k in meanLpartial.keys()}
-        
-        return 
+        return weights_original, weights_original2, weights_normal_imp, weights_normal_exp, weights_david
+
 
     def weighted_loss(self, unweighted_loss):
         ''' Computes the final weighted loss'''
@@ -562,15 +483,42 @@ class NeuralOperatorModel(keras.Model):
         meanLpartial = {**meanLpartial_phy, **meanLpartial_der}
         # meanLpartial = {self.keys[n]:tf.reduce_mean(tf.reduce_sum(Lpartial[n], axis=[-1,-2])) for n in range(nL)}
         
-        # loss = tf.reduce_sum([self.kappas[k]*meanLpartial[k] for k in meanLpartial.keys()])        
-        loss = tf.reduce_sum([1. * meanLpartial[k] for k in meanLpartial.keys()])
+        loss = tf.reduce_sum([meanLpartial[k] for k in meanLpartial.keys()]) 
+        # meanLpartial = {k:self.kappas[k]*v for k,v in meanLpartial.items()}
+        # tf.print(meanLpartial)
+        # tf.print(meanLpartial_weighted)
+        # loss = tf.reduce_sum([1. * meanLpartial[k] for k in meanLpartial.keys()])
+        
+        return loss, meanLpartial
+    
+    def weighted_loss2(self, unweighted_loss, b):
+        ''' Computes the final weighted loss'''
+        
+        # Computation of the number of parcial loss terms involved
+        nItems_phy = len(self.keys_phy)
+        nItems_der = len(self.keys_der)
+        
+        # Divide array of loss into phy and der
+        Lphy = unweighted_loss[:,:nItems_phy*self.grid.ncells,:]
+        Lder = unweighted_loss[:,nItems_phy*self.grid.ncells:,:]
+        bphy = b[:,:nItems_phy*self.grid.ncells,:]
+        bder = b[:,nItems_phy*self.grid.ncells:,:]
+        
+        # Extract the partial losses from the general loss
+        Lpartial_phy = tf.split(Lphy, num_or_size_splits=nItems_phy, axis=1) #[(b,e,1),...,(b,e,1)]
+        Lpartial_der = tf.split(Lder, num_or_size_splits=max(nItems_der,1), axis=1) #[(b,e,1),...,(b,e,1)]
+        bpartial_phy = tf.split(bphy, num_or_size_splits=nItems_phy, axis=1) #[(b,e,1),...,(b,e,1)]
+        bpartial_der = tf.split(bder, num_or_size_splits=max(nItems_der,1), axis=1) #[(b,e,1),...,(b,e,1)]
+        meanLpartial_phy = {self.keys_phy[n]:tf.reduce_mean(Lpartial_phy[n]/bpartial_phy[n]) for n in range(nItems_phy)}
+        meanLpartial_der = {self.keys_der[n]:tf.reduce_mean(Lpartial_der[n]/bpartial_der[n]) for n in range(nItems_der)}
+        meanLpartial = {**meanLpartial_phy, **meanLpartial_der}
+        
+        loss = tf.reduce_sum([meanLpartial[k] for k in meanLpartial.keys()]) 
         
         return loss, meanLpartial
         
+    # @tf.function(jit_compile=True)
     def train_step(self, data):
-        return self._train_step_fn(data)
-
-    def _train_step_core(self, data):
         ''' Training loop'''
 
         x_dict, y_dict = data 
@@ -590,7 +538,8 @@ class NeuralOperatorModel(keras.Model):
                 trainable_vars = [weight.value for weight in self.net.trainable_weights] #GPU
             else:
                 trainable_vars = self.net.trainable_weights #CPU
-        
+        trainable_vars = [weight.value for weight in self.net.trainable_weights]
+            
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             tape.watch(trainable_vars)
             
@@ -624,10 +573,9 @@ class NeuralOperatorModel(keras.Model):
                 'L2re_u': self.train_L2re_u_tracker.result(),
                 'L2re_grad_u': self.train_L2re_grad_u_tracker.result()}
     
-    def test_step(self, data):
-        return self._test_step_fn(data)
     
-    def _test_step_core(self, data):
+    @tf.function(jit_compile=True)
+    def test_step(self, data):
         ''' Validation loop'''
         
         x_dict, y_dict = data 
@@ -730,6 +678,7 @@ class NeuralOperatorModel(keras.Model):
 
         return LBFGS_history
 
+    # @tf.function(jit_compile=True)
     def call(self, data):
         '''Prepares the data and calls to the DeepONet'''
         

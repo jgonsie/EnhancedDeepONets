@@ -16,9 +16,6 @@ def upload_case(case_directory, time, fieldNames, case):
 
     result = {}
     ncells = case.num_cell+1
-    # ncells_b = {}
-    # for k in case.boundary.keys():
-    #     ncells_b[k] = len(list(case.boundary_cells(k)))
 
     def upload_time(time, field):
         def prepare_data(reading, ncells):
@@ -38,17 +35,12 @@ def upload_case(case_directory, time, fieldNames, case):
             upload = Ofpp.parse_field_all(route)
             result_centers = prepare_data(upload[0], ncells)
 
-        result_boundaries = {}
-        # for k,v in upload[1].items():
-        #     if len(list(v.keys())) >= 1 and b'value' in list(v.keys()):
-        #         result_boundaries[k] = prepare_data(v[b'value'], ncells_b[k])
-
-        return  (result_centers, result_boundaries)
+        return  result_centers
    
     for field in fieldNames:
         # print(case_directory, time, field)
-        temp = upload_time(time, field)    
-        center_values = temp[0]
+        center_values = upload_time(time, field)    
+
         # if sorted(temp[0][1].keys()) != sorted(temp[-1][1].keys()):
         #     raise ValueError (f'foamRW: Not same boundaries for all timesteps in field: {field}.\nRemember to substitute $internalField by the corresponding value in the OpenFOAM field files!')
         # boundary_values = {k:[dic[k] for _, dic in temp] for k in temp[0][1].keys()}
@@ -56,21 +48,11 @@ def upload_case(case_directory, time, fieldNames, case):
         if field == 'U':
             result['v_x'] = np.array([i[0] for i in center_values])
             result['v_y'] = np.array([i[1] for i in center_values])
-            # result['x_velocity_b']  = {}
-            # result['y_velocity_b']  = {}
-            # for boundary in ncells_b.keys():
-            #     if boundary in boundary_values.keys():
-            #         result['x_velocity_b'][boundary.decode('utf-8')] = tf.convert_to_tensor([i[:,0] for i in boundary_values[boundary]], dtype=dtype)
-            #         result['y_velocity_b'][boundary.decode('utf-8')] = tf.convert_to_tensor([i[:,1] for i in boundary_values[boundary]], dtype=dtype)
         elif 'grad' in field:
             result[field+'_x'] = np.array([i[0] for i in center_values])
             result[field+'_y'] = np.array([i[1] for i in center_values])
         else:
             result[field] = np.array(center_values)
-            # result[field+'_b']  = {}
-            # for boundary in ncells_b.keys():
-            #     if boundary in boundary_values.keys():
-            #         result[field+'_b'][boundary.decode('utf-8')] = tf.convert_to_tensor(boundary_values[boundary], dtype=dtype)
 
     return result
 
@@ -104,7 +86,7 @@ def upload_vector(root_directory):
     
     return gradMu
 
-def upload_training_data(root_directory, time=0.1, diagonal=True, jacobian=False, dtype='float64'):
+def upload_training_data(root_directory, time=0.1, jacobian=False, dtype='float64'):
     
     case_directories = np.sort(os.listdir(root_directory))
     field_names = os.listdir(root_directory+case_directories[0]+'/0')

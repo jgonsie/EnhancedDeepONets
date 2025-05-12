@@ -172,14 +172,16 @@ def plot_log_data_distribution(DTs, E_training, E_conv, E_diff):
     plt.show()
     return plot
 
-def plot_log_data_distribution2(DTs_tr, E_tr, DTs_val, E_val, E_conv, E_diff):
+def plot_log_data_distribution2(DTs_tr, E_tr, DTs_val, E_val, E_conv, E_diff, name):
     plot = plt.figure(figsize=(8, 5))
     plt.scatter(DTs_tr, E_tr, color='red', s=30, marker='D',zorder=2, edgecolors='white', label='Training data')
     plt.scatter(DTs_val, E_val, color='blue', s=10 ,zorder=1, label='Validation data')
     # plt.plot(D_values, metrics, color='blue', linestyle='--', alpha=0.5)
     plt.xscale('log')  # Log scale for D
     plt.xlabel('Diffusion Coefficient $(\mu)$ [$m^2/s$]')
-    plt.ylabel('$||u_h||_2^2$')
+    if name == 'u': var = '$||u_h||_2^2$'
+    elif name == 'gradu': var = r'$||\nabla u_h||_2^2$'
+    plt.ylabel(var)
     ax = plt.gca()
     xlim0, xlim1 = ax.get_xlim()
     plt.axvspan(xlim0, 0.14, alpha=0.1, color='red', label='Convection-Dominated')

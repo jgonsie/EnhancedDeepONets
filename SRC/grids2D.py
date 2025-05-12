@@ -194,25 +194,25 @@ class Grid():
         
         return (points, weights)
     
-    def generate_quadrature_centroids(self, batch=1):
+    def generate_quadrature_centroids(self, dtype):
         '''Generate integration points and weights using Quasi-Montecarlo quadrature'''
         
         points = {}
         weights = {}
         
-        x = np.asarray(self.axis_x, dtype='float32')
+        x = np.asarray(self.axis_x, dtype=dtype)
         y = tf.repeat(x,repeats=self.size_y)
-        x_exp = tf.expand_dims(tf.expand_dims(x, axis=-1), axis=0)
-        y_exp = tf.expand_dims(tf.expand_dims(y, axis=-1), axis=0)
-        points['coord_x'] = tf.tile(x_exp,[batch,self.size_y,1])
-        points['coord_y'] = tf.tile(y_exp,[batch,1,1])
+        x_exp = tf.expand_dims(x, axis=-1)
+        y_exp = tf.expand_dims(y, axis=-1)
+        points['coord_x'] = tf.tile(x_exp,[self.size_y,1])
+        points['coord_y'] = tf.tile(y_exp,[1,1])
         
-        # weights = tf.ones([batch,self.ncells,1], dtype='float64') * self.area
-        weights = tf.ones([batch,self.ncells,1], dtype='float32')
+        # weights = tf.ones([self.ncells,1], dtype='float64') * self.area
+        weights = tf.ones([self.ncells,1], dtype=dtype)
         
         return (points, weights)
     
-    def generate_quadrature_tf(self, method, batch=1, n_points=4):
+    def generate_quadrature_random_tf(self, method, batch=1, n_points=4):
         
         if type(method) == np.ndarray: method = np.array2string(method)[2:-1]
         else: method = method.decode("utf-8")
@@ -228,8 +228,6 @@ class Grid():
             (points, weights) = self.generate_quadrature_mc(batch, n_points)
         elif method == 'QMC':
             (points, weights) = self.generate_quadrature_qmc(batch, n_points)
-        elif method == 'centroids':
-            (points, weights) = self.generate_quadrature_centroids (batch)
         else:
             ValueError(f'Quadrature method selected not found: {method}')
         
@@ -267,7 +265,7 @@ class Grid():
 # pointsP2, weightsP2 = grid.generate_quadrature_gauss_p2(batch=7)
 # pointsMC, weightsMC = grid.generate_quadrature_mc(batch=7,npoints=10)
 # pointsQMC, weightsQMC = grid.generate_quadrature_qmc(batch=7, npoints=16)
-# pointsCENT, weightsCENT = grid.generate_quadrature_centroids(batch=7)
+# pointsCENT, weightsCENT = grid.generate_quadrature_centroids('float32')
 
 # import matplotlib.pyplot as plt
 

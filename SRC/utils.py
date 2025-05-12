@@ -49,7 +49,7 @@ def prepare_raw_data_items(data, train_split = 20, outputs=['T', 'grad(T)_x', 'g
     samples, _ = data[outputs[0]].shape
     indices = tf.range(start=0, limit=samples, dtype=tf.int32)
     keras.utils.set_random_seed(1234)
-    shuffled_indices = tf.random.shuffle(indices, seed=42)
+    shuffled_indices = tf.random.shuffle(indices, seed=420)
     # shuffled_indices = indices
     
     training_ind = shuffled_indices[:int(train_split)]
@@ -137,6 +137,18 @@ def DT_lognorm_dist(sigma, mu, samples, low_bound=0.01, up_bound=15):
     
     return np.sort(realizations)
 
+def generate_loss_weights(y_train):
+    '''Generates the loss weights based on the relation between the L2 norms of the data'''
+  
+    w_gradu_mu = tf.sqrt(tf.reduce_sum(tf.square(y_train['T']))) / tf.sqrt(tf.reduce_sum(tf.square(y_train['jacMu(T)'])))     
+    w_gradu_x = tf.sqrt(tf.reduce_sum(tf.square(y_train['T']))) / tf.sqrt(tf.reduce_sum(tf.square(y_train['grad(T)_x'])))     
+    w_gradu_y = tf.sqrt(tf.reduce_sum(tf.square(y_train['T']))) / tf.sqrt(tf.reduce_sum(tf.square(y_train['grad(T)_y']))) 
+    loss_weights = {'loss_u': tf.constant((1.), dtype=y_train['T'].dtype), 
+                    'loss_gradu_mu': w_gradu_mu,
+                    'loss_gradu_x': w_gradu_x, 
+                    'loss_gradu_y': w_gradu_y} 
+    return loss_weights
+
 def get_model_performance(test_step, data_training, data_validation, print_results=False):
     '''Returns the losses and errors of the model inside the training and validation
     distribution for the new weights'''
@@ -165,3 +177,20 @@ def get_model_performance(test_step, data_training, data_validation, print_resul
         print(f'Error grad_u: {err_val_grad_u:.2f}')
     
     return {**metrics_tr, **metrics_val}
+
+def fix_random(n):
+    '''Fixes random seeds for reproducibility'''
+    
+    np.random.seed(n)
+    keras.utils.set_random_seed(n)
+    return
+
+def fix_precission(double_precission = True):
+    
+    if double_precission:
+        dtype = 'float64'
+    else:
+        dtype = 'float32'
+        
+    keras.backend.set_floatx(dtype)
+    return dtype

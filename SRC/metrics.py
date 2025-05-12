@@ -7,32 +7,7 @@ Created on Sat Apr 19 18:38:47 2025
 """
 
 import tensorflow as tf
-import keras as keras
-
-
-# class relativeL2error(keras.metrics.Metric):
-#     def __init__(self, name="relative_L2_error", **kwargs):
-#         super().__init__(name=name, **kwargs)
-#         self.num = self.add_weight(name='num', initializer='zeros')
-#         self.den = self.add_weight(name='den', initializer='zeros')
-#         self.count_total = self.add_weight(name='counter', initializer='zeros')
-        
-#     def update_state(self, y_true, y_pred):
-#         num = tf.reduce_sum(tf.square(y_true-y_pred))
-#         den = tf.reduce_sum(tf.square(y_true))
-#         self.num.assign_add(num)
-#         self.den.assign_add(den)
-        
-#         count = tf.size(y_true)
-#         self.count_total.assign_add(count)
-        
-#     def result(self):
-#         return tf.sqrt(self.num / (self.den + 1e-12)) / self.count_total * 100
-    
-#     def reset_states(self):
-#         self.num.assign(0.0)
-#         self.den.assign(0.0)
-#         self.count_total.assign(0.0)
+import keras
 
 class relativeL2error(keras.metrics.Metric):
     def __init__(self, name="relative_L2_error", **kwargs):
@@ -71,7 +46,7 @@ class relativeL1error(keras.metrics.Metric):
         self.count_total.assign_add(count)
 
     def result(self):
-        return tf.get_static_value((self.num / (self.den + 1e-12)) / self.count_total * 100)
+        return (self.num / (self.den + 1e-12)) / self.count_total * 100
     
     def reset_states(self):
         self.num.assign(0.0)
