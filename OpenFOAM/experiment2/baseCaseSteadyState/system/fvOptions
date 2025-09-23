@@ -1,0 +1,73 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2206                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      fvOptions;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+codedSource
+{
+    type            scalarCodedSource;
+    active          true;
+    name	    codedSource;
+
+    scalarCodedSourceCoeffs
+    {
+   	 selectionMode   all;
+   	 fields          (T);
+
+   	 codeCorrect
+    	 #{
+        	//vectorField& testField = fld;
+   	 #};
+
+   	 codeAddSup
+   	 #{
+       		const scalarField& V = mesh_.V();
+        	scalarField& heSource = eqn.source();
+		scalar PI_ = Foam::constant::mathematical::pi;
+
+        	// Retrieve the x and y component of the cell centres
+        	//const scalarField& cellx = mesh_.C().component(0);
+		//const scalarField& celly = mesh_.C().component(1);
+
+        	// Apply the source
+        	//forAll(cellx, i)
+        	//{
+            	//	// cell volume specific source
+            	//	//heSource[i] += 1e5*sin(200*cellx[i])*V[i];
+		//	heSource[i] += 1.5*PI_*sin(1.5*PI_*(cellx[i]+celly[i]))*V[i];
+          	//}
+		
+		forAll(mesh_.C(), celli)
+		{
+			heSource[celli] += 1.5*PI_*sin(1.5*PI_*(mesh_.C()[celli].component(0)+mesh_.C()[celli].component(1)))*V[celli];
+		}
+    	  #};
+
+	  codeConstrain
+          #{
+          #};    
+
+          code
+          #{
+              $codeInclude
+              $codeCorrect
+              $codeAddSup
+              $codeSetValue
+          #};
+     }
+
+}
+
+
+// ************************************************************************* //

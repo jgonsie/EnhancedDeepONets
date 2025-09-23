@@ -1,0 +1,45 @@
+/*---------------------------------------------------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  2112                                  |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+Build  : 7df292779d-20230614 OPENFOAM=2112 version=plus
+Arch   : "LSB;label=64;scalar=64"
+AD Tool: "AD v1.0"
+Exec   : postProcess -func grad(T)
+Date   : Apr 11 2025
+Time   : 11:20:54
+Host   : MSI-LEOPARD
+PID    : 2041
+I/O    : uncollated
+Case   : /mnt/c/Users/jgs_j/Desktop/Perth/OpenFOAM/tests/pure_convection
+nProcs : 1
+trapFpe: Floating point exception trapping enabled (FOAM_SIGFPE).
+fileModificationChecking : Monitoring run-time modified files using timeStampMaster (fileModificationSkew 5, maxFileModificationPolls 20)
+allowSystemOperations : Allowing user-supplied system call operations
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+Create time
+
+Create mesh for time = 0
+
+Time = 0
+
+Reading fields:
+    volScalarField: T
+
+Executing functionObjects
+    functionObjects::grad grad(T) writing field: grad(T)
+
+Time = 0.1
+
+Reading fields:
+    volScalarField: T
+
+Executing functionObjects
+    functionObjects::grad grad(T) writing field: grad(T)
+
+End
+

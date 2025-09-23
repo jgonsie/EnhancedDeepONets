@@ -1,4 +1,0 @@
-SOURCE = \
-scalarTransportHetADFoam.C \
-
-# sources

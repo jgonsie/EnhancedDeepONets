@@ -1,3 +1,0 @@
-scalarTransportAnisotFoam.C
-
-EXE = $(FOAM_APPBIN)/scalarTransportAnisotFoam

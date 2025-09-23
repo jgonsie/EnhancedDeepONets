@@ -1,3 +1,0 @@
-scalarTransportHetSourceFoam.C
-
-EXE = $(FOAM_APPBIN)/scalarTransportHetSourceFoam

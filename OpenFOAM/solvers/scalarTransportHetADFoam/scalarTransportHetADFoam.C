@@ -58,7 +58,7 @@ Description
 #include "fvCFD.H"
 #include "fvOptions.H"
 #include "simpleControl.H"
-
+// #include "IFstream.H"
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 int main(int argc, char *argv[])
@@ -75,6 +75,7 @@ int main(int argc, char *argv[])
 
     simpleControl simple(mesh);
 
+    //#include "readRegionData.H"
     #include "createFields.H"
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
@@ -89,16 +90,19 @@ int main(int argc, char *argv[])
 
     label nCells = T.size();
 
-    std::vector<double> JacMu(nCells*nCells, 0.0);
-	std::vector<double> JacUx(nCells*nCells, 0.0);
-	std::vector<double> JacUy(nCells*nCells, 0.0);
-
+    std::vector<double> dTdDT1(nCells, 0.0);
+	std::vector<double> dTdDT2(nCells, 0.0);
+    // std::vector<double> dTdUx(nCells*nCells, 0.0);
+	// std::vector<double> dTdUy(nCells*nCells, 0.0);
+    
     // register inputs w.r.t. we want to diff.
-	AD::registerInputVariable(DT.begin(), DT.end());
-    for(int i=0; i<nCells; i++){
-        AD::registerInputVariable(U[i][0]);
-        AD::registerInputVariable(U[i][1]);
-    }
+	AD::registerInputVariable(regionDT[0]);
+    AD::registerInputVariable(regionDT[1]);
+    // for(int i=0; i<nCells; i++){
+    //     AD::registerInputVariable(U[i][0]);
+    //     AD::registerInputVariable(U[i][1]);
+    // }
+    #include "modifyFields.H"
 	#include "createPhi.H"
 	#include "CourantNo.H"
 	
@@ -147,35 +151,55 @@ int main(int argc, char *argv[])
 	Info<< "Forward execution finished\n" << endl;
 	AD::switchTapeToPassive();
 
-	for(int i=0; i<nCells; i++){
+    for(int i=0; i<nCells; i++){
 		Info << "Interpret " << i << " / " << nCells << endl;
 		AD::derivative(T[i]) = 1.0;
 		AD::interpretTape();
-		for(int j=0; j<nCells; j++){
-			JacMu[i*nCells+j] = AD::derivative(DT[j]);
-			JacUx[i*nCells+j] = AD::derivative(U[j][0]);
-			JacUy[i*nCells+j] = AD::derivative(U[j][1]);
-		}
+		dTdDT1[i] = AD::derivative(regionDT[0]);
+        dTdDT2[i] = AD::derivative(regionDT[1]);
 		AD::zeroAdjointVector();
 	}
 	
 	Info<< "Reverse execution finished\n" << endl;
-	std::ofstream ofs1("jacMu(T)");
-	std::ofstream ofs2("jacUx(T)");
-	std::ofstream ofs3("jacUy(T)");
+	std::ofstream ofs1("jacMu1(T)");
+    std::ofstream ofs2("jacMu2(T)");
 	for(int i=0; i<nCells; i++){
-		for(int j=0; j<nCells; j++){
-			ofs1 << JacMu[i*nCells+j] << " ";
-			ofs2 << JacUx[i*nCells+j] << " ";
-			ofs3 << JacUy[i*nCells+j] << " ";
-		}
-		ofs1 << "\n";
-		ofs2 << "\n";
-		ofs3 << "\n";
+		ofs1 << dTdDT1[i] << "\n";
+        ofs2 << dTdDT2[i] << "\n";
 	}
-	ofs1.close();
-	ofs2.close();
-	ofs3.close();
+
+    ofs1.close();
+    ofs2.close();
+
+	// for(int i=0; i<nCells; i++){
+	// 	Info << "Interpret " << i << " / " << nCells << endl;
+	// 	AD::derivative(T[i]) = 1.0;
+	// 	AD::interpretTape();
+	// 	for(int j=0; j<nCells; j++){
+	// 		JacMu[i*nCells+j] = AD::derivative(DT[j]);
+	// 		JacUx[i*nCells+j] = AD::derivative(U[j][0]);
+	// 		JacUy[i*nCells+j] = AD::derivative(U[j][1]);
+	// 	}
+	// 	AD::zeroAdjointVector();
+	// }
+	
+	// Info<< "Reverse execution finished\n" << endl;
+	// std::ofstream ofs1("jacMu(T)");
+	// std::ofstream ofs2("jacUx(T)");
+	// std::ofstream ofs3("jacUy(T)");
+	// for(int i=0; i<nCells; i++){
+	// 	for(int j=0; j<nCells; j++){
+	// 		ofs1 << JacMu[i*nCells+j] << " ";
+	// 		ofs2 << JacUx[i*nCells+j] << " ";
+	// 		ofs3 << JacUy[i*nCells+j] << " ";
+	// 	}
+	// 	ofs1 << "\n";
+	// 	ofs2 << "\n";
+	// 	ofs3 << "\n";
+	// }
+	// ofs1.close();
+	// ofs2.close();
+	// ofs3.close();
 
 	AD::resetTape();
 
