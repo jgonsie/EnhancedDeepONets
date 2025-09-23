@@ -8,6 +8,8 @@ Created on Mon Nov 18 10:44:29 2024
 import numpy as np
 import matplotlib.pyplot as plt
 
+width = 6.7
+
 def plot_field(data, grid, label, vmin, vmax):
     fig, ax = plt.subplots(1, 1)
     X, Y = np.meshgrid(grid.axis_x, grid.axis_y)
@@ -45,7 +47,8 @@ def plot_partialLosses_train(df_history):
               'loss_gradu_vx': 'partial(u/vx)', 'loss_gradu_vy': 'partial(u/vy)',
               'loss_gradu_mu': 'partial(u/mu)', 'loss_vgradu_x': 'vgrad(u)_x', 
               'loss_vgradu_y': 'vgrad(u)_y', 'loss_mugradu_x': 'mugrad(u)_x',
-              'loss_mugradu_y': 'mugrad(u)_y'}
+              'loss_mugradu_y': 'mugrad(u)_y', 'loss_gradu_mu1': 'partial(u/mu1)',
+              'loss_gradu_mu2': 'partial(u/mu2)', 'loss_gradu_v': 'partial(u/v)'}
     fig, ax = plt.subplots(1, 1)
     for k in keys:
         ax.plot(np.array(df_history[k]), label=labels[k])
@@ -66,7 +69,9 @@ def plot_partialLosses_val(df_history):
               'val_loss_gradu_vx': 'partial(u/vx)', 'val_loss_gradu_vy': 'partial(u/vy)',
               'val_loss_gradu_mu': 'partial(u/mu)', 'val_loss_vgradu_x': 'vgrad(u)_x',
               'val_loss_vgradu_y': 'vgrad(u)_y', 'val_loss_mugradu_x': 'mugrad(u)_x',
-              'val_loss_mugradu_y': 'mugrad(u)_y'}
+              'val_loss_mugradu_y': 'mugrad(u)_y', 'val_loss_gradu_mu1': 'partial(u/mu1)',
+              'val_loss_gradu_mu2': 'partial(u/mu2)', 'val_loss_gradu_v': 'partial(u/v)'}
+    
     fig, ax = plt.subplots(1, 1)
     for k in keys:
         ax.plot(np.array(df_history[k]), label=labels[k])
@@ -173,25 +178,75 @@ def plot_log_data_distribution(DTs, E_training, E_conv, E_diff):
     return plot
 
 def plot_log_data_distribution2(DTs_tr, E_tr, DTs_val, E_val, E_conv, E_diff, name):
-    plot = plt.figure(figsize=(8, 5))
+    plot = plt.figure(figsize=(width, width * 0.6211))
     plt.scatter(DTs_tr, E_tr, color='red', s=30, marker='D',zorder=2, edgecolors='white', label='Training data')
     plt.scatter(DTs_val, E_val, color='blue', s=10 ,zorder=1, label='Validation data')
     # plt.plot(D_values, metrics, color='blue', linestyle='--', alpha=0.5)
     plt.xscale('log')  # Log scale for D
-    plt.xlabel('Diffusion Coefficient $(\mu)$ [$m^2/s$]')
+    plt.xlabel('Diffusion coefficient $(\mu)$ [$m^2/s$]')
     if name == 'u': var = '$||u_h||_2^2$'
     elif name == 'gradu': var = r'$||\nabla u_h||_2^2$'
     plt.ylabel(var)
     ax = plt.gca()
     xlim0, xlim1 = ax.get_xlim()
-    plt.axvspan(xlim0, 0.14, alpha=0.1, color='red', label='Convection-Dominated')
-    plt.axvspan(1.41, xlim1*10, alpha=0.1, color='green', label='Diffusion-Dominated')
-    secax = ax.secondary_xaxis('top', functions=(lambda x: np.sqrt(2) / (x+1e-8), lambda x: np.sqrt(2) / (x+1e-8)))
-    secax.set_xlabel('Pe number [-]')
     plt.axhline(E_conv, color='orange', linestyle='--', label='Pure-convection Energy')
     plt.axhline(E_diff, color='green', linestyle='--', label='Pure-diffusion Energy')
+    plt.axvspan(xlim0, 0.14, alpha=0.1, color='red', label='Convection-dominated')
+    plt.axvspan(1.41, xlim1*10, alpha=0.1, color='green', label='Diffusion-dominated')
+    secax = ax.secondary_xaxis('top', functions=(lambda x: np.sqrt(2) / (x+1e-8), lambda x: np.sqrt(2) / (x+1e-8)))
+    secax.set_xlabel('Pe number [-]')
     plt.legend()
     plt.grid(True, which="both", ls="--")
     plt.xlim(left=xlim0, right=xlim1)
     plt.show()
     return plot
+
+def plot_log_data_distribution3(x_train, x_val, y_train, y_val, pure_conv_case,
+                                pure_diff_case, grid):
+    
+    E_conv_u = np.sum(pure_conv_case['T']**2) * (grid.step**2)
+    E_diff_u = np.sum(pure_diff_case['T']**2) * (grid.step**2)
+    E_tr_u = np.sum(y_train['T']**2, axis=1) * (grid.step**2)
+    E_val_u = np.sum(y_val['T']**2, axis=1) * (grid.step**2)
+  
+    E_conv_gradu = np.sum(pure_conv_case['grad(T)_x']**2+ pure_conv_case['grad(T)_y']**2) * (grid.step**2)
+    E_diff_gradu = np.sum(pure_diff_case['grad(T)_x']**2+pure_diff_case['grad(T)_y']**2) * (grid.step**2)
+    E_tr_gradu = np.sum(y_train['grad(T)_x']**2+y_train['grad(T)_y']**2, axis=1) * (grid.step**2)
+    E_val_gradu = np.sum(y_val['grad(T)_x']**2+y_val['grad(T)_y']**2, axis=1) * (grid.step**2)
+
+    fig, ax = plt.subplots(2, 1, figsize=(width, width * 0.53))
+    ax[0].axhline(E_conv_u, color='orange', linestyle='--', label='Pure-convection energy', zorder=1)
+    ax[0].axhline(E_diff_u, color='green', linestyle='--', label='Pure-diffusion energy', zorder=1)
+    ax[0].scatter(x_train['DT'], E_tr_u, color='red', s=30, marker='D',zorder=3, edgecolors='white', label='Training data')
+    ax[0].scatter(x_val['DT'], E_val_u, color='blue', s=10 ,zorder=2, label='Validation data')
+    ax[0].set_xscale('log')  # Log scale for D
+    ax[0].set_ylabel(r'$||u_h||_2^2$')
+    xlim0, xlim1 = ax[0].get_xlim()
+    ax[0].axvspan(xlim0, 0.014, alpha=0.1, color='red', label='Convection-dominated')
+    ax[0].axvspan(1.41, xlim1*10, alpha=0.1, color='green', label='Diffusion-dominated')
+    secax = ax[0].secondary_xaxis('top', functions=(lambda x: np.sqrt(2) / (x+1e-8), lambda x: np.sqrt(2) / (x+1e-8)))
+    secax.set_xlabel('Pe number [-]')
+    ax[0].grid(True, which="both", ls="--")
+    ax[0].set_xlim(left=xlim0, right=xlim1)
+    
+    ax[1].axhline(E_conv_gradu, color='orange', linestyle='--', label='Pure-convection energy', zorder=1)
+    ax[1].axhline(E_diff_gradu, color='green', linestyle='--', label='Pure-diffusion energy', zorder=1)
+    ax[1].scatter(x_train['DT'], E_tr_gradu, color='red', s=30, marker='D',zorder=3, edgecolors='white', label='Training data')
+    ax[1].scatter(x_val['DT'], E_val_gradu, color='blue', s=10 ,zorder=2, label='Validation data')
+    ax[1].set_xscale('log')  # Log scale for D
+    ax[1].set_xlabel('Diffusion coefficient $(\mu)$ [$m^2/s$]')
+    ax[1].set_ylabel(r'$||\nabla u_h||_2^2$')
+    xlim0, xlim1 = ax[1].get_xlim()
+    ax[1].axvspan(xlim0, 0.014, alpha=0.1, color='red', label='Convection-dominated')
+    ax[1].axvspan(1.41, xlim1*10, alpha=0.1, color='green', label='Diffusion-dominated')
+    secax = ax[1].secondary_xaxis('top', functions=(lambda x: np.sqrt(2) / (x+1e-8), lambda x: np.sqrt(2) / (x+1e-8)))
+    secax.set_xticks([])
+    ax[1].grid(True, which="both", ls="--")
+    ax[1].set_xlim(left=xlim0, right=xlim1)
+    
+    lines_labels = [ax.get_legend_handles_labels() for ax in fig.axes[0:1]]
+    lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
+    fig.legend(lines, labels, loc="upper center", ncol=3, bbox_to_anchor=(0.5,0.05))
+    fig.tight_layout()
+    
+    return fig

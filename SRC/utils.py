@@ -8,7 +8,7 @@ Created on Mon Apr 14 20:32:26 2025
 import tensorflow as tf
 import keras as keras
 import numpy as np
-from scipy.stats import lognorm
+from scipy.stats import lognorm, loguniform
 
 def extract_batch(x_train, y_train, initial, size):
     '''Extracts a batch of data from (x_train, y_train)'''
@@ -43,7 +43,7 @@ def prepare_raw_data_percentage(data, train_split = 0.8, outputs=['T', 'grad(T)_
     
     return x_train, y_train, x_val, y_val
     
-def prepare_raw_data_items(data, train_split = 20, outputs=['T', 'grad(T)_x', 'grad(T)_y', 'jacMu(T)', 'jacUx(T)', 'jacUy(T)']):
+def prepare_raw_data_items(data, train_split = 20, outputs=['T', 'grad(T)_x', 'grad(T)_y', 'jacMu(T)', 'jacMu1(T)', 'jacMu2(T)', 'jacV(T)']):
     ''' Divides the raw data into training and validation sets'''
     
     samples, _ = data[outputs[0]].shape
@@ -62,12 +62,15 @@ def prepare_raw_data_items(data, train_split = 20, outputs=['T', 'grad(T)_x', 'g
     
     return x_train, y_train, x_val, y_val
 
-def prepare_raw_data_items_esp(data, train_split = 20, outputs=['T', 'grad(T)_x', 'grad(T)_y', 'jacMu(T)', 'jacUx(T)', 'jacUy(T)']):
+def prepare_raw_data_items_esp(data, train_split = 20, outputs=['T', 'grad(T)_x', 'grad(T)_y', 'jacMu(T)', 'jacMu1(T)', 'jacMu2(T)', 'jacV(T)']):
     ''' Divides the raw data into training (as spread as possible) and 
     validation sets '''
-    
-    DTs = data['DT']
-    
+        
+    if 'DT' not in data.keys():
+        DTs = data['DT1']
+    else:
+        DTs = data['DT']
+        
     # Take log10 of data for better spread across orders of magnitude
     log_data = np.log(DTs)
     
@@ -84,6 +87,53 @@ def prepare_raw_data_items_esp(data, train_split = 20, outputs=['T', 'grad(T)_x'
         # Find the closest point in the dataset
         closest = DTs[np.argmin(np.abs(DTs - target))]
         selected.append(closest)
+    
+    # Convert to numpy array
+    selected = np.array(selected)
+    
+    # Get indices of selected training elements
+    mask = np.isin(DTs, selected)
+    training_ind = np.where(mask)[0]
+    validation_ind = np.where(~mask)[0]
+    
+    x_train = {k:tf.expand_dims(tf.gather(v, training_ind, axis=0), axis=-1) for k,v in data.items() if k not in outputs}
+    y_train = {k:tf.expand_dims(tf.gather(v, training_ind, axis=0), axis=-1) for k,v in data.items() if k in outputs}
+    x_val = {k:tf.expand_dims(tf.gather(v, validation_ind, axis=0), axis=-1) for k,v in data.items() if k not in outputs}
+    y_val = {k:tf.expand_dims(tf.gather(v, validation_ind, axis=0), axis=-1) for k,v in data.items() if k in outputs}
+    
+    return x_train, y_train, x_val, y_val
+
+def prepare_raw_data_items_esp2(data, train_split = 20, outputs=['T', 'grad(T)_x', 'grad(T)_y', 'jacMu(T)', 'jacMu1(T)', 'jacMu2(T)', 'jacV(T)']):
+    ''' Divides the raw data into training (as spread as possible) and 
+    validation sets '''
+        
+    if 'DT' not in data.keys():
+        DTs = data['DT1']
+    else:
+        DTs = data['DT']
+        
+    # Take log10 of data for better spread across orders of magnitude
+    log_data = np.log(DTs)
+    
+    # Create X bins over the log space
+    bins = np.linspace(np.min(log_data), np.max(log_data), train_split + 1)
+    
+    # Compute bins centers
+    bin_centers = 0.5 * (bins[:-1] + bins[1:])
+    
+    selected = []
+    for center in bin_centers:
+        # Convert centers back to linear space
+        target = np.exp(center)
+        
+        if center == bin_centers[0]:
+            selected.append(DTs[0])
+        elif center == bin_centers[-1]:
+            selected.append(DTs[-1])
+        else:
+            # Find the closest point in the dataset
+            closest = DTs[np.argmin(np.abs(DTs - target))]
+            selected.append(closest)
     
     # Convert to numpy array
     selected = np.array(selected)
@@ -137,17 +187,41 @@ def DT_lognorm_dist(sigma, mu, samples, low_bound=0.01, up_bound=15):
     
     return np.sort(realizations)
 
+def DT_loguniform_dist(samples, low_bound=0.01, up_bound=15):
+    ''' Generates random samples from a log-uniform distribution 
+    '''
+    # Create the distribution object
+    dist = loguniform(low_bound, up_bound)
+    
+    # Sample realizations
+    x = dist.rvs(samples)
+    realizations = np.array(x)
+    
+    return np.sort(realizations)
+
 def generate_loss_weights(y_train):
     '''Generates the loss weights based on the relation between the L2 norms of the data'''
-  
-    w_gradu_mu = tf.sqrt(tf.reduce_sum(tf.square(y_train['T']))) / tf.sqrt(tf.reduce_sum(tf.square(y_train['jacMu(T)'])))     
-    w_gradu_x = tf.sqrt(tf.reduce_sum(tf.square(y_train['T']))) / tf.sqrt(tf.reduce_sum(tf.square(y_train['grad(T)_x'])))     
-    w_gradu_y = tf.sqrt(tf.reduce_sum(tf.square(y_train['T']))) / tf.sqrt(tf.reduce_sum(tf.square(y_train['grad(T)_y']))) 
-    loss_weights = {'loss_u': tf.constant((1.), dtype=y_train['T'].dtype), 
-                    'loss_gradu_mu': w_gradu_mu,
-                    'loss_gradu_x': w_gradu_x, 
-                    'loss_gradu_y': w_gradu_y} 
+    
+    loss_weights = {}
+    
+    for k in y_train.keys():
+        if k == 'T':
+            loss_weights['loss_u'] = tf.constant((1.), dtype=y_train['T'].dtype)
+        elif k == 'grad(T)_x':
+            loss_weights['loss_gradu_x'] = tf.sqrt(tf.reduce_sum(tf.square(y_train['T']))) / tf.sqrt(tf.reduce_sum(tf.square(y_train['grad(T)_x'])))     
+        elif k == 'grad(T)_y': 
+            loss_weights['loss_gradu_y'] = tf.sqrt(tf.reduce_sum(tf.square(y_train['T']))) / tf.sqrt(tf.reduce_sum(tf.square(y_train['grad(T)_y']))) 
+        elif k == 'jacMu(T)':
+            loss_weights['loss_gradu_mu'] = tf.sqrt(tf.reduce_sum(tf.square(y_train['T']))) / tf.sqrt(tf.reduce_sum(tf.square(y_train['jacMu(T)'])))     
+        elif k == 'jacMu1(T)':
+            loss_weights['loss_gradu_mu1'] = tf.sqrt(tf.reduce_sum(tf.square(y_train['T']))) / tf.sqrt(tf.reduce_sum(tf.square(y_train['jacMu1(T)'])))     
+        elif k == 'jacMu2(T)':
+            loss_weights['loss_gradu_mu2'] = tf.sqrt(tf.reduce_sum(tf.square(y_train['T']))) / tf.sqrt(tf.reduce_sum(tf.square(y_train['jacMu2(T)'])))     
+        elif k == 'jacV(T)':
+            loss_weights['loss_gradu_v'] = tf.sqrt(tf.reduce_sum(tf.square(y_train['T']))) / tf.sqrt(tf.reduce_sum(tf.square(y_train['jacV(T)'])))     
+
     return loss_weights
+
 
 def get_model_performance(test_step, data_training, data_validation, print_results=False):
     '''Returns the losses and errors of the model inside the training and validation
