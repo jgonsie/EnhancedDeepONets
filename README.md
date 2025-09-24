@@ -15,5 +15,11 @@ The files are organized as follows:
 2. Run the OpenFOAM simulation based on the realizations of the random variables. More information in the OpenFOAM folder.
 3. Training of the models:
    - single_training: Run the training of a single model with certain initialization.
-   - parallel_training: Run in parallel the training of different models and different initializations. The automatic GPU memory (buffer) assigment is deactivated, so the parallelization is carried out in a single GPU. The files must be adapted depending of the features of the GPU.
-4. Once the models are trained, the performance comparison and the generation of figures can be performed by executing the files contained in the postprocess folder.
+   - parallel_training: Run in parallel the training of different models and different initializations. The automatic GPU memory (buffer) assigment is deactivated, so the parallelization is carried out in a single GPU. The files must be adapted depending of the features of the GPU.\
+  
+   In this context, one can select between the four considered models:
+   - H1, LS=False: Vanilla loss function trained with GD.
+   - H1, LS=True: Vanilla loss function trained with hybrid GD/LS.
+   - H1+der, LS=False: Derivative-enhanced loss function trained with GD.
+   - H1+der, LS=True: Derivative-enhanced loss function trained with hybrid GD/LS.
+4. Once the models are trained, the performance comparison and the generation of figures can be performed by executing the files contained in the *postprocess* folder.
